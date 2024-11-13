@@ -29,13 +29,14 @@ embedding_topk = 10
 bm25_topn = 10
 docs_top = 1
 
+# 輸出檔案名稱設定
 # output_file = f"../data/test_result/result.json"
 name = 'final_run2_301-600'
 r_path = f'../data/test_result/result_{name}.json'
 wa_path = f'../data/test_result/wa_{name}.json'
 log_path = f'../logs/{name}.json'
 
-tmp_path = './tmp.json' # 錯誤時存檔處
+tmp_path = './tmp.json' # 錯誤時存檔位置
 
 out_path = f'../outputs/pred_retrieve_final_run2_301-600.json'  # 輸出繳交檔案格式的路徑
 q_path = '../data/dataset/preliminary/questions_preliminary.json' # 問題路徑
@@ -44,6 +45,7 @@ notes = ''
 
 prompt = """你是一個RAG 檢索篩選機器人，你會根據query 以及chunks 列表輸出一個最能正確回答query 的 chunk ID。\n每一個chunks 前後都有<|start_chunk_X|> 和 <|end_chunk_X|> 標籤，其中X代表chunk ID。\n輸入：query、chunks 列表\n輸出：一個最能正確回答query 的 chunk ID，無論如何一定要輸出一個，不能輸出'沒有找到相關的chunk來回答這個query'等等語句。\n你的回答必須符合下列格式與規範：\n1. 禁止greeting \n2. 只輸出一個數字，禁止輸出任何其他符號或是文字\n範例輸出：15"""
 
+api_key = 'sk-'	# OpenAI api key
 
 
 """
@@ -107,6 +109,15 @@ for entry in tqdm(data):
 
 
 def merge_question_answers(data):
+	"""
+	合併問題和答案為一個字串列表。
+	
+	參數:
+	data (dict) -- 包含問題和多個答案的字典。
+	
+	返回:
+	list: 合併後的問題和答案字串列表。
+	"""
 	question = data.get('question')
 	answers = data.get('answers')
 	return [ f"問題：{question} 答案：{answer}" for  answer in answers] if question and answers else None
@@ -157,13 +168,13 @@ with open("v5_400_200_table.pkl", "rb") as file:
 
 chunk_dict = {
 	'faq':{
-		
+
 	},
 	'finance':{
-		
+
 	},
 	'insurance':{
-		
+
 	}
 }
 for key,value in G_faq.items():
@@ -193,10 +204,20 @@ Retrive Function
 """
 from collections import Counter
 def retrieve_documents(query, source_list, G, k=1, threshold=0.5):
+	"""
+	檢索相關文檔。
+
+	參數:
+	query (str)			-- 檢索的查詢字串。
+	source_list (list)	-- 資料來源列表。
+	G (dict)			-- 資料字典。
+	k (int)				-- 需要返回的文檔數量。
+	threshold (float)	-- 分數閾值。
+
+	返回:
+	list				-- 包含檢索結果的列表。
+	"""
 	query_embedding = model.encode(query, convert_to_tensor=True)
-	# query_inputs = question_tokenizer(query, return_tensors="pt")
-	# query_embedding = question_encoder(**query_inputs).pooler_output
-	# print(query, source_list)
 	scores = []
 	for entry_id in source_list:
 		if entry_id not in G:
@@ -204,21 +225,30 @@ def retrieve_documents(query, source_list, G, k=1, threshold=0.5):
 		for data in G.get(entry_id):
 			score = util.pytorch_cos_sim(query_embedding, data.get('embedding'))[0].item()
 			scores.append((entry_id, data.get('id'), score))
-	# print(scores)
 	
 	sorted_scores = sorted(scores, key=lambda x: x[2], reverse=True)
-	# print(sorted_scores)
 	top_scores = sorted_scores[:k]
 	return top_scores
 
 
-def retrieve_documents_bm25(query, source_list, G, n = 1):
-	# Tokenize the query and documents
+def retrieve_documents_bm25(query, source_list, G, n=1):
+	"""
+	使用BM25檢索相關文檔。
+
+	參數:
+	query (str)			-- 檢索的查詢字串。
+	source_list (list)	-- 資料來源列表。
+	G (dict)			-- 資料字典。
+	n (int)				-- 需要返回的文檔數量。
+
+	返回:
+	list				-- 包含檢索結果的列表。
+	"""
 	tokenized_query = list(jieba.cut_for_search(query))  # Simple tokenization, modify as needed
 	corpus = []
 	tokenized_corpus = []
 	documents = []
-	
+
 	for entry_id in source_list:
 		if entry_id not in G:
 			continue
@@ -226,13 +256,13 @@ def retrieve_documents_bm25(query, source_list, G, n = 1):
 			corpus.append(data.get('text'))
 			tokenized_corpus.append(list(jieba.cut_for_search(data.get('text'))))  # Tokenize each document
 			documents.append(data.get('text'))
-	
+
 	# Initialize BM25
 	bm25 = BM25Okapi(tokenized_corpus)
 	
 	ans_list = bm25.get_top_n(tokenized_query, list(documents), n)
 	ans_id_list = set()
-	
+
 	for entry_id in source_list:
 		if entry_id not in G:
 			continue
@@ -246,9 +276,24 @@ def retrieve_documents_bm25(query, source_list, G, n = 1):
 
 from openai import OpenAI
 import os
-api_key = 'sk-'
 os.environ['OPENAI_API_KEY'] = api_key
 def llm_chat(messages, model, temperature=0.5, max_tokens=10, top_p=1, frequency_penalty=0, presence_penalty=0, stop=[]):
+	"""
+	與大型語言模型進行對話。
+
+	參數:
+	messages (list)				-- 對話訊息列表。
+	model (str)					-- 使用的模型名稱。
+	temperature (float)			-- 溫度參數。
+	max_tokens (int)			-- 最大字數。
+	top_p (float)				-- Top P選擇。
+	frequency_penalty (float)	-- 頻率懲罰。
+	presence_penalty (float)	-- 出現懲罰。
+	stop (list): 停止條件。
+
+	返回:
+	str							-- 模型生成的回應。
+	"""
 	try:
 		client = OpenAI(
 			api_key=os.environ.get("OPENAI_API_KEY"),
@@ -267,31 +312,52 @@ def llm_chat(messages, model, temperature=0.5, max_tokens=10, top_p=1, frequency
 		return f"error: {str(e)}"
 
 def llm_select(query, options_list, prompt):
+	"""
+	使用大型語言模型從選項列表中選擇。
+
+	參數:
+	query (str)			-- 查詢字串。
+	options_list (list)	-- 選項列表。
+	prompt (str)		-- 提示字串。
+
+	返回:
+	str					-- 選擇的選項。
+	"""
 	query = f'query: {query}\n\nchunk list: {[i for i, source, chunk in options_list]}\n' + "\n".join([f"<|start_chunk_{i}|> {chunk} <|end_chunk_{i}|>" for i, source, chunk in (options_list)]) + f'你的輸出必須是{[i for i, source, chunk in options_list]}的其中一個數字'
 	messages=[
 		{
-		"role": "system",
-		"content": [
-			{
-			"type": "text",
-			"text": prompt
-			}
-		]
+			"role": "system",
+			"content": [
+				{
+					"type": "text",
+					"text": prompt
+				}
+			]
 		},
 		{
-		"role": "user",
-		"content": [
-			{
-				"type": "text",
-				"text": query
-			}
-		]
+			"role": "user",
+			"content": [
+				{
+					"type": "text",
+					"text": query
+				}
+			]
 		}
 	]
 	chunk_id = llm_chat(messages, 'gpt-4o')
 	return chunk_id
 
 def find_overlap(str1, str2):
+	"""
+	找出兩個字串的最大重疊部分。
+
+	參數:
+	str1 (str)		-- 字串1。
+	str2 (str)		-- 字串2。
+
+	返回:
+	int				-- 最大重疊部分的長度。
+	"""
 	max_overlap = 0
 	for i in range(1, min(len(str1), len(str2)) + 1):
 		if str1[-i:] == str2[:i]:
@@ -299,6 +365,15 @@ def find_overlap(str1, str2):
 	return max_overlap
 
 def merge_overlap(my_set):
+	"""
+	合併集合中的重疊字串。
+
+	參數:
+	my_set (set)	-- 字串集合。
+
+	返回:
+	set				-- 合併後的字串集合。
+	"""
 	lst = sorted(my_set, key=lambda x: x[0])
 	ret_set = set()
 	i = 0
@@ -307,11 +382,11 @@ def merge_overlap(my_set):
 			str1 = lst[i][2]
 			str2 = lst[i + 1][2]
 			overlap_length = find_overlap(str1, str2)
-			
+
 			if overlap_length > 0:
 				merged_text = str1 + str2[overlap_length:]
 				lst[i] = (lst[i][0], lst[i][1], merged_text)
-				
+
 				del lst[i + 1]
 			else:
 				i += 1
@@ -329,17 +404,28 @@ result = merge_overlap(empty_set)
 print("最終合併結果集合:", result)
 
 def get_options(category, retrieved_embeddings, retrieved_bm25):
+	"""
+	根據分類和檢索結果獲取選項。
+
+	參數:
+	category (str)				-- 分類名稱。
+	retrieved_embeddings (list)	-- 嵌入檢索結果。
+	retrieved_bm25 (list)		-- BM25檢索結果。
+
+	返回:
+	tuple						-- 包含選項列表和檢索集合的元組。
+	"""
 	option_list = set()
 	e_set = list()
 	bm25_set = list()
-	
+
 	for chunk in retrieved_embeddings:
 		option_list.add((chunk[1], chunk_dict[category][chunk[1]]['source'], chunk_dict[category][chunk[1]]['text']))
 		e_set.append((chunk[1], chunk_dict[category][chunk[1]]['source'], chunk_dict[category][chunk[1]]['text']))
 	for chunk in retrieved_bm25:
 		option_list.add((chunk[1], chunk_dict[category][chunk[1]]['source'], chunk_dict[category][chunk[1]]['text']))
 		bm25_set.append((chunk[1], chunk_dict[category][chunk[1]]['source'], chunk_dict[category][chunk[1]]['text']))
-		
+
 	option_list = merge_overlap(option_list)
 	return option_list, e_set, bm25_set
 
@@ -347,10 +433,25 @@ retrieve_documents_bm25('被保險人於本契約有效期間內身故，本公�
 
 
 def run(q_path, embedding_topk, bm25_topn, docs_top, prompt, run_list, tmp_path):
+	"""
+	主執行函數。
+
+	參數:
+	q_path (str)			-- 問題檔案路徑。
+	embedding_topk (int)	-- 嵌入檢索的Top K。
+	bm25_topn (int)			-- BM25檢索的Top N。
+	docs_top (int)			-- 文件檢索的Top。
+	prompt (str)			-- 提示字串。
+	run_list (list)			-- 執行列表。
+	tmp_path (str)			-- 暫存檔案路徑。
+
+	返回:
+	dict					-- 包含答案的字典。
+	"""
 	answer_dict = {"answers": []}
 	with open(q_path, 'rb') as f:
 		qs_ref = json.load(f)
-	
+
 	for q_dict in tqdm(qs_ref['questions']):
 		try:
 			if not q_dict['qid'] in run_list:
@@ -358,47 +459,39 @@ def run(q_path, embedding_topk, bm25_topn, docs_top, prompt, run_list, tmp_path)
 			if q_dict['category'] == 'finance':
 				retrieved_embeddings = retrieve_documents(q_dict[ 'query'], q_dict['source'], G_finance, k = embedding_topk)
 				retrieved_bm25 = retrieve_documents_bm25(q_dict[ 'query'], q_dict['source'], G_finance, n = bm25_topn)
-				# print(retrieved_embeddings, retrieved_bm25)
-				
+
 				for s in q_dict['source']:
 					retrieved_embeddings += retrieve_documents(q_dict[ 'query'], [s], G_finance, k = docs_top)
 					retrieved_bm25 += retrieve_documents_bm25(q_dict[ 'query'], [s], G_finance, n = docs_top)
-				# print(retrieved_embeddings, retrieved_bm25)
 				option_list, e_set, bm25_set = get_options('finance', retrieved_embeddings, retrieved_bm25)
-				
+
 				selected_chunk = llm_select(q_dict['query'], option_list, prompt)
 				retrieved = chunk_dict['finance'][int(selected_chunk)]['source']
-				
+
 				answer_dict['answers'].append({"qid": q_dict['qid'], "query": q_dict['query'], "retrieve": retrieved, "selected_chunk": (selected_chunk, chunk_dict['finance'][int(selected_chunk)]['text']), "option_list": list(option_list), "bm25_chunks": bm25_set, "embeddings_chunks": e_set})
-				
+
 			elif q_dict['category'] == 'insurance':
 				retrieved_embeddings = retrieve_documents(q_dict[ 'query'], q_dict['source'], G_insurance, k = embedding_topk)
 				retrieved_bm25 = retrieve_documents_bm25(q_dict[ 'query'], q_dict['source'], G_insurance, n = bm25_topn)
-				# print(retrieved_embeddings, retrieved_bm25)
+
 				for s in q_dict['source']:
-					# print(s)
 					retrieved_embeddings += retrieve_documents(q_dict[ 'query'], [s], G_insurance, k = docs_top)
 					retrieved_bm25 += retrieve_documents_bm25(q_dict[ 'query'], [s], G_insurance, n = docs_top)
-				
+
 				option_list, e_set, bm25_set = get_options('insurance', retrieved_embeddings, retrieved_bm25)
-				# print(retrieved_embeddings, retrieved_bm25)
 				selected_chunk = llm_select(q_dict['query'], option_list, prompt)
 				retrieved = chunk_dict['insurance'][int(selected_chunk)]['source']
-				
+
 				answer_dict['answers'].append({"qid": q_dict['qid'], "query": q_dict['query'], "retrieve": retrieved, "selected_chunk": (selected_chunk, chunk_dict['insurance'][int(selected_chunk)]['text']), "option_list": list(option_list), "bm25_chunks": bm25_set, "embeddings_chunks": e_set})        # print(retrieved)
 			elif q_dict['category'] == 'faq':
 				retrieved_embeddings = retrieve_documents(q_dict[ 'query'], q_dict['source'], G_faq, k = 7)
 				retrieved_bm25 = retrieve_documents_bm25(q_dict[ 'query'], q_dict['source'], G_faq, n = 7)
-				
-				# for s in q_dict['source']:
-				#     retrieved_embeddings += retrieve_documents(q_dict[ 'query'], [s], G_faq, k = docs_top)
-				#     retrieved_bm25 += retrieve_documents_bm25(q_dict[ 'query'], [s], G_faq, n = docs_top)
-				
-				option_list, e_set, bm25_set = get_options('faq', retrieved_embeddings, retrieved_bm25)   
+
+				option_list, e_set, bm25_set = get_options('faq', retrieved_embeddings, retrieved_bm25)
 
 				selected_chunk = llm_select(q_dict['query'], option_list, prompt)
 				retrieved = chunk_dict['faq'][int(selected_chunk)]['source']
-				
+
 				answer_dict['answers'].append({"qid": q_dict['qid'], "query": q_dict['query'], "retrieve": retrieved, "selected_chunk": (selected_chunk, chunk_dict['faq'][int(selected_chunk)]['text']), "option_list": list(option_list), "bm25_chunks": bm25_set, "embeddings_chunks": e_set})
 			else:
 				raise ValueError("Something went wrong")
@@ -419,13 +512,23 @@ def run(q_path, embedding_topk, bm25_topn, docs_top, prompt, run_list, tmp_path)
 				print(f'stored tmp file to {tmp_path}')
 			except Exception as e:
 				print(f'error storing tmp file: {e}')
-			
+
 	return answer_dict
 
 import json
 
 def calculate_accuracy(ground_truth_filename, pred_filename, wa_path):
+	"""
+	計算準確率。
 
+	參數:
+	ground_truth_filename (str)	-- 標準答案檔案名稱。
+	pred_filename (str)			-- 預測答案檔案名稱。
+	wa_path (str)				-- 錯誤答案檔案路徑。
+
+	返回:
+	float						-- 準確率。
+	"""
 	wrong_answer_list = []
 	with open(ground_truth_filename, 'r') as f1, open(pred_filename, 'r') as f2:
 		ground_truth_data = json.load(f1)
@@ -452,6 +555,13 @@ def calculate_accuracy(ground_truth_filename, pred_filename, wa_path):
 	return accuracy
 
 def output_std_ans(r_path, out_path):
+	"""
+	輸出標準答案。
+
+	參數:
+	r_path (str)	-- 結果檔案路徑。
+	out_path (str)	-- 輸出檔案路徑。
+	"""
 	ans_dict = {}
 	ans_list = []
 	with open(r_path, 'r') as f1:
@@ -471,8 +581,6 @@ def output_std_ans(r_path, out_path):
 Run
 """
 run_list = [i for i in range(301, 601)]
-# print(run_list)
-# run_list = [64, 70, 82]
 answer_dict = run(q_path, embedding_topk, bm25_topn, docs_top, prompt, run_list, tmp_path)
 
 with open(r_path, 'w', encoding='utf8') as f:
