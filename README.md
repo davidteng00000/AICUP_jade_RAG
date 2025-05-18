@@ -1,4 +1,4 @@
-# Legal Document Retrieval using Hybrid RAG for AICUP2024
+# Financial Document Retrieval for AICUP2024
 
 This repository presents our solution for the [AICUP2024 Legal Document Retrieval Challenge](https://tbrain.trendmicro.com.tw/Competitions/Details/37). The task focuses on retrieving relevant documents for answering legal or financial questions using retrieval-augmented generation (RAG). We employ a hybrid retrieval method combining dense embedding and sparse keyword-based search for optimal document coverage and precision.
 
